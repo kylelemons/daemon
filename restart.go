@@ -148,14 +148,16 @@ func (w *WaitListener) noop() {
 
 // A Listenable is something which can listen.  It can either
 // be backed by a file descriptor of an existing listener,
-// or if none is available, a new listener.
+// or if none is available, a new listener.  String returns
+// the intended address for the listening socket as a string.
 type Listenable interface {
 	Listen() (net.Listener, error)
+	String() string
 }
 
 type listenFlag struct {
-	flag string
-	mode string // "fd", "tcp"
+	flag, proto string
+	mode        string // "fd", "tcp"
 
 	// mode == "fd"
 	fd       int
@@ -181,7 +183,7 @@ func (l *listenFlag) Listen() (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	Verbose.Printf("Listening on: %s (from %s)", under.Addr(), l.mode)
+	Verbose.Printf("Listening for %s on: %s (from %s)", l.proto, under.Addr(), l.mode)
 	listener := &WaitListener{
 		Listener: under,
 		stop:     make(chan bool),
@@ -229,6 +231,7 @@ func ListenFlag(name, netw, addr, proto string) Listenable {
 
 	f := &listenFlag{
 		flag:  name,
+		proto: proto,
 		mode:  "tcp",
 		net:   netw,
 		laddr: laddr,
