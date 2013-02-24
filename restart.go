@@ -9,7 +9,9 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -65,6 +67,9 @@ func (w *WaitListener) Accept() (conn net.Conn, err error) {
 
 	conn, err = w.Listener.Accept()
 	if err != nil {
+		if strings.Contains(err.Error(), "closed network connection") {
+			return nil, ErrStopped
+		}
 		return nil, err
 	}
 
@@ -234,22 +239,20 @@ func ListenFlag(name, netw, addr, proto string) Listenable {
 
 // Restart re-execs the current process, passing all of the same flags,
 // except that ListenFlags will be replaced with "&fd" to copy the file
-// descriptor from this process.  Restart will not return until
-// all connections on the listeners have closed or the timeout has passed
-// (in which case it will return ErrTimeout).
-func Restart(timeout time.Duration) error {
+// descriptor from this process.  Restart does not return.
+func Restart(timeout time.Duration) {
 	type port interface {
 		noop()
 		Wait()
 	}
 
-	var waiters []port
+	var ports []port
 	var flags []string
 
 	flag.VisitAll(func(f *flag.Flag) {
 		if lf, ok := f.Value.(*listenFlag); ok && lf.listener != nil {
 			fd := lf.listener.Stop()
-			waiters = append(waiters, lf.listener)
+			ports = append(ports, lf.listener)
 			flags = append(flags, fmt.Sprintf("--%s=&%d", f.Name, fd))
 			return
 		}
@@ -257,7 +260,7 @@ func Restart(timeout time.Duration) error {
 	})
 
 	// Send noop connections to free up the accept loops
-	for _, w := range waiters {
+	for _, w := range ports {
 		w.noop()
 	}
 
@@ -267,21 +270,93 @@ func Restart(timeout time.Duration) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
-		return err
+		Fatal.Printf("Restart exec failed: %s", err)
 	}
 
 	// Wait for all connections to close out
 	done := make(chan bool)
 	go func() {
 		defer close(done)
-		for _, w := range waiters {
+		for _, w := range ports {
 			w.Wait()
 		}
 	}()
 	select {
 	case <-done:
 	case <-time.After(timeout):
-		return ErrTimeout
+		Fatal.Printf("Restart timed out after %s", timeout)
 	}
-	return nil
+	Verbose.Printf("Restart complete")
+	os.Exit(0)
+}
+
+// Shutdown closes all ListenFlags and waits for their connections to
+// finish.  Shutdown does not return.
+func Shutdown(timeout time.Duration) {
+	type port interface {
+		Wait()
+	}
+
+	var ports []port
+	flag.VisitAll(func(f *flag.Flag) {
+		if lf, ok := f.Value.(*listenFlag); ok && lf.listener != nil {
+			lf.listener.Close()
+			ports = append(ports, lf.listener)
+		}
+	})
+
+	// Wait for all connections to close out
+	done := make(chan bool)
+	go func() {
+		defer close(done)
+		for _, w := range ports {
+			w.Wait()
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		Fatal.Printf("Shutdown timed out after %s", timeout)
+	}
+	Info.Printf("Shutdown complete")
+	os.Exit(0)
+}
+
+// LameDuck specifies the duration of the lame duck mode after the
+// listener is closed before the binary exits.
+var LameDuck = 15 * time.Second
+
+// Run is the last thing to call from main.  It does not return.
+//
+// Run handles the following signals:
+//   SIGINT    - Calls Shutdown
+//   SIGTERM   - Calls Shutdown
+//   SIGHUP    - Calls Restart
+//   SIGUSR1   - Dumps a stack trace to the logs
+//
+// If another signal is received during Shutdown or Restart, the process
+// will terminate immediately.
+func Run() {
+	incoming := make(chan os.Signal, 10)
+	signals := []os.Signal{
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGHUP,
+		syscall.SIGUSR1,
+	}
+	signal.Notify(incoming, signals...)
+	for sig := range incoming {
+		switch sig {
+		case syscall.SIGINT, syscall.SIGTERM:
+			go Shutdown(LameDuck)
+			<-incoming
+			Fatal.Printf("Shutdown aborted")
+		case syscall.SIGHUP:
+			go Restart(LameDuck)
+			<-incoming
+			Fatal.Printf("Restart aborted")
+		case syscall.SIGUSR1:
+			V(-5).Printf("SIGUSR1: Stack dump:\n" + stack())
+		}
+	}
 }

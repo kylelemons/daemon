@@ -54,7 +54,7 @@ func (l Logger) prefix() string {
 	return "V: "
 }
 
-func (l Logger) die(message string) {
+func stack() string {
 	n, stack := 0, make([]byte, 4096)
 	for i := 0; i < 10; i++ {
 		n = runtime.Stack(stack, true)
@@ -68,9 +68,7 @@ func (l Logger) die(message string) {
 	} else {
 		stack = stack[:n]
 	}
-	logger.Output(3, message+"\n"+string(stack))
-	logFile.Sync()
-	os.Exit(1)
+	return string(stack)
 }
 
 // Printf formats the log message and writes it to the log if
@@ -84,12 +82,15 @@ func (l Logger) Printf(format string, args ...interface{}) {
 		return
 	}
 	msg := fmt.Sprintf(l.prefix()+format, args...)
-	if l == Fatal {
-		l.die(msg)
+	if l <= Fatal {
+		msg += "\n" + stack()
 	}
 	logger.Output(2, msg)
 	if l < Info {
 		logFile.Sync()
+	}
+	if l == Fatal {
+		os.Exit(1)
 	}
 }
 

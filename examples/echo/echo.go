@@ -41,9 +41,9 @@ func main() {
 		daemon.Info.Printf("Serve loop exited")
 	}()
 
-	time.Sleep(*delay)
-	if err := daemon.Restart(15 * time.Second); err != nil {
-		daemon.Fatal.Printf("restart: %s", err)
-	}
-	daemon.Info.Printf("Exiting")
+	go func() {
+		time.Sleep(*delay)
+		daemon.Restart(15 * time.Second)
+	}()
+	daemon.Run()
 }
