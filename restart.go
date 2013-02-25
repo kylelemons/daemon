@@ -1,5 +1,3 @@
-// +build linux darwin
-
 package daemon
 
 import (
@@ -14,9 +12,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	// Only needed for Dup
-	"syscall"
 )
 
 // ErrStopped is returned when Accept is called on a listener
@@ -113,7 +108,7 @@ func (w *WaitListener) Stop() int {
 	}
 	fd := lf.Fd()
 
-	newFD, err := syscall.Dup(int(fd))
+	newFD, err := dup(int(fd))
 	if err != nil {
 		Fatal.Printf("failed to dup(%d): %s", fd, err)
 	}
@@ -341,25 +336,29 @@ var LameDuck = 15 * time.Second
 // will terminate immediately.
 func Run() {
 	incoming := make(chan os.Signal, 10)
-	signals := []os.Signal{
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGHUP,
-		syscall.SIGUSR1,
-	}
 	signal.Notify(incoming, signals...)
 	for sig := range incoming {
-		switch sig {
-		case syscall.SIGINT, syscall.SIGTERM:
+		switch sigAction(sig) {
+		case sigShutdown:
 			go Shutdown(LameDuck)
 			<-incoming
 			Fatal.Printf("Shutdown aborted")
-		case syscall.SIGHUP:
+		case sigRestart:
 			go Restart(LameDuck)
 			<-incoming
 			Fatal.Printf("Restart aborted")
-		case syscall.SIGUSR1:
-			V(-5).Printf("SIGUSR1: Stack dump:\n" + stack())
+		case sigStackDump:
+			V(-5).Printf("Stack dump:\n" + stack())
+		default:
+			Warning.Printf("Unknown signal: %s", sig)
 		}
 	}
 }
+
+// Return values for platform-specific sigAction
+const (
+	sigUnknown = iota
+	sigShutdown
+	sigRestart
+	sigStackDump
+)
