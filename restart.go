@@ -266,10 +266,9 @@ func spawn(arg0 string, flags []string) {
 // descriptor from this process.  Restart does not return.
 func Restart(timeout time.Duration) {
 	arg0, flags, ports := copyFlags()
-
-	// Send noop connections to free up the accept loops
 	for _, w := range ports {
 		w.Stop()
+		// Send noop connections to free up the accept loops
 		w.noop()
 	}
 
@@ -295,17 +294,10 @@ func Restart(timeout time.Duration) {
 // Shutdown closes all ListenFlags and waits for their connections to
 // finish.  Shutdown does not return.
 func Shutdown(timeout time.Duration) {
-	type port interface {
-		Wait()
+	_, _, ports := copyFlags()
+	for _, w := range ports {
+		w.Close()
 	}
-
-	var ports []port
-	flag.VisitAll(func(f *flag.Flag) {
-		if lf, ok := f.Value.(*listenFlag); ok && lf.listener != nil {
-			lf.listener.Close()
-			ports = append(ports, lf.listener)
-		}
-	})
 
 	// Wait for all connections to close out
 	done := make(chan bool)
