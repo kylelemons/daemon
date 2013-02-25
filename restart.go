@@ -237,19 +237,8 @@ func ListenFlag(name, netw, addr, proto string) Listenable {
 	return f
 }
 
-// Restart re-execs the current process, passing all of the same flags,
-// except that ListenFlags will be replaced with "&fd" to copy the file
-// descriptor from this process.  Restart does not return.
-func Restart(timeout time.Duration) {
-	type port interface {
-		Stop()
-		noop()
-		Wait()
-	}
-
-	var ports []port
-	var flags []string
-
+func copyFlags() (arg0 string, flags []string, ports []*WaitListener) {
+	arg0 = os.Args[0]
 	flag.VisitAll(func(f *flag.Flag) {
 		if lf, ok := f.Value.(*listenFlag); ok && lf.listener != nil {
 			fd := lf.listener.Dup()
@@ -259,6 +248,24 @@ func Restart(timeout time.Duration) {
 		}
 		flags = append(flags, fmt.Sprintf("--%s=%s", f.Name, f.Value))
 	})
+	return
+}
+
+func spawn(arg0 string, flags []string) {
+	Verbose.Printf("Spawning process: %q %q", arg0, flags)
+	cmd := exec.Command(arg0, flags...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		Fatal.Printf("Exec failed: %s", err)
+	}
+}
+
+// Restart re-execs the current process, passing all of the same flags,
+// except that ListenFlags will be replaced with "&fd" to copy the file
+// descriptor from this process.  Restart does not return.
+func Restart(timeout time.Duration) {
+	arg0, flags, ports := copyFlags()
 
 	// Send noop connections to free up the accept loops
 	for _, w := range ports {
@@ -266,14 +273,7 @@ func Restart(timeout time.Duration) {
 		w.noop()
 	}
 
-	arg0 := os.Args[0]
-	Verbose.Printf("Restarting process: %q %q", arg0, flags)
-	cmd := exec.Command(arg0, flags...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		Fatal.Printf("Restart exec failed: %s", err)
-	}
+	spawn(arg0, flags)
 
 	// Wait for all connections to close out
 	done := make(chan bool)
