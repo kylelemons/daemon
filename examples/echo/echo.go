@@ -11,6 +11,7 @@ import (
 
 var (
 	echo  = daemon.ListenFlag("echo", "tcp", ":12112", "echo")
+	fork  = daemon.ForkPIDFlags("fork", "pidfile", "echo.pid")
 	delay = flag.Duration("delay", 1*time.Minute, "Delay between restarts")
 )
 
@@ -18,6 +19,7 @@ func main() {
 	flag.Parse()
 
 	daemon.LogLevel = daemon.Verbose
+	fork.Fork()
 
 	port, err := echo.Listen()
 	if err != nil {

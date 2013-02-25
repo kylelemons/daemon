@@ -187,6 +187,9 @@ func (l *listenFlag) Listen() (net.Listener, error) {
 }
 
 func (l *listenFlag) String() string {
+	if l.laddr.IP == nil {
+		return fmt.Sprintf(":%d", l.laddr.Port)
+	}
 	return l.laddr.String()
 }
 

@@ -6,16 +6,25 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"time"
 )
 
 func copyFlags() (arg0 string, flags []string, ports []*WaitListener) {
 	arg0 = os.Args[0]
 	flag.VisitAll(func(f *flag.Flag) {
-		if lf, ok := f.Value.(*listenFlag); ok && lf.listener != nil {
-			fd := lf.listener.Dup()
-			ports = append(ports, lf.listener)
+		switch val := f.Value.(type) {
+		case *listenFlag:
+			if val.listener == nil {
+				// flag hasn't been listened yet, so just pass through
+				break
+			}
+			fd := val.listener.Dup()
+			ports = append(ports, val.listener)
 			flags = append(flags, fmt.Sprintf("--%s=&%d", f.Name, fd))
+			return
+		case *forkFlag:
+			// Don't pass fork on to subprocesses
 			return
 		}
 		flags = append(flags, fmt.Sprintf("--%s=%s", f.Name, f.Value))
@@ -86,6 +95,62 @@ func Shutdown(timeout time.Duration) {
 	}
 	Info.Printf("Shutdown complete")
 	os.Exit(0)
+}
+
+// A Forker knows how to duplicate the main process by replicating its flags.
+// Fork only returns in the subprocess.  The parent process exits, and the
+// child process writes its pid to the pidfile.
+type Forker interface {
+	Fork()
+}
+
+type forkFlag struct {
+	fork    bool
+	pidfile string
+}
+
+func (f *forkFlag) String() string {
+	return fmt.Sprintf("%v", f.fork)
+}
+
+func (f *forkFlag) Set(s string) error {
+	b, err := strconv.ParseBool(s)
+	if err != nil {
+		return err
+	}
+	f.fork = b
+	return nil
+}
+
+func (f *forkFlag) Fork() {
+	if f.fork {
+		// Don't fork in the child
+		f.fork = false
+
+		Verbose.Printf("Forking into the background")
+		arg0, flags, _ := copyFlags()
+		spawn(arg0, flags)
+		os.Exit(0)
+	}
+
+	pidfile, err := os.Create(f.pidfile)
+	if err != nil {
+		Error.Printf("Failed to create pidfile: %s", err)
+		return
+	}
+	defer pidfile.Close()
+
+	fmt.Fprintf(pidfile, "%d\n", os.Getpid())
+	Verbose.Printf("Wrote PID to %s", f.pidfile)
+}
+
+// ForkPIDFlags registers two flags, with the given names, and returns a Forker
+// which should be called to manage forking and writing the PID to file.
+func ForkPIDFlags(forkFlagName, pidFlagName string, defPIDFile string) Forker {
+	f := &forkFlag{}
+	flag.StringVar(&f.pidfile, pidFlagName, defPIDFile, "File to which to write PID")
+	flag.BoolVar(&f.fork, forkFlagName, false, "Fork into the background")
+	return f
 }
 
 // LameDuck specifies the duration of the lame duck mode after the
