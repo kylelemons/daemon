@@ -77,26 +77,27 @@ func (w *WaitListener) Accept() (conn net.Conn, err error) {
 	}, nil
 }
 
-// Close closes the listener; it is an error to close more than once.
+// Close stops and closes the listener; it is an error to close more than once.
 func (w *WaitListener) Close() error {
-	select {
-	case <-w.stop:
-		return ErrStopped
-	default:
-		close(w.stop)
-	}
+	close(w.stop)
 
 	Verbose.Printf("Closing listener: %s", w.Addr())
 	return w.Listener.Close()
 }
 
-// Stop stops the listener and returns its underlying file descriptor.  This is
-// intended to be used to pass the file descriptor on to a restarted version of
-// this process.  After Stop, it may be necessary to create a dummy connection
-// to this Listener to fall out of an existing Accept.
-func (w *WaitListener) Stop() int {
+// Stop stops the listener so that it can be used in another process.  After
+// Stop, it may be necessary to create a dummy connection to this Listener to
+// fall out of an existing Accept.  It is an error to call Stop more than once.
+func (w *WaitListener) Stop() {
 	close(w.stop)
 
+	Verbose.Printf("Stopping listener: %s", w.Addr())
+}
+
+// Dup copies the listener's underlying file descriptor.  This is intended to
+// be used to pass the file descriptor on to a restarted version of this
+// process.
+func (w *WaitListener) Dup() int {
 	tcp, ok := w.Listener.(*net.TCPListener)
 	if !ok {
 		Fatal.Printf("unknown listener type: %T", w.Listener)
@@ -113,6 +114,7 @@ func (w *WaitListener) Stop() int {
 		Fatal.Printf("failed to dup(%d): %s", fd, err)
 	}
 	return newFD
+
 }
 
 // Wait waits for all associated connections to close.
@@ -240,6 +242,7 @@ func ListenFlag(name, netw, addr, proto string) Listenable {
 // descriptor from this process.  Restart does not return.
 func Restart(timeout time.Duration) {
 	type port interface {
+		Stop()
 		noop()
 		Wait()
 	}
@@ -249,7 +252,7 @@ func Restart(timeout time.Duration) {
 
 	flag.VisitAll(func(f *flag.Flag) {
 		if lf, ok := f.Value.(*listenFlag); ok && lf.listener != nil {
-			fd := lf.listener.Stop()
+			fd := lf.listener.Dup()
 			ports = append(ports, lf.listener)
 			flags = append(flags, fmt.Sprintf("--%s=&%d", f.Name, fd))
 			return
@@ -259,6 +262,7 @@ func Restart(timeout time.Duration) {
 
 	// Send noop connections to free up the accept loops
 	for _, w := range ports {
+		w.Stop()
 		w.noop()
 	}
 
