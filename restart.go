@@ -10,6 +10,13 @@ import (
 	"time"
 )
 
+// Only allow one routine to try to stop the binary
+var stopOnce = make(chan bool, 1)
+
+func init() {
+	stopOnce <- true
+}
+
 func copyFlags() (arg0 string, flags []string, ports []*WaitListener) {
 	arg0 = os.Args[0]
 	flag.VisitAll(func(f *flag.Flag) {
@@ -46,6 +53,8 @@ func spawn(arg0 string, flags []string) {
 // except that ListenFlags will be replaced with "&fd" to copy the file
 // descriptor from this process.  Restart does not return.
 func Restart(timeout time.Duration) {
+	<-stopOnce
+
 	arg0, flags, ports := copyFlags()
 	for _, w := range ports {
 		w.Stop()
@@ -75,6 +84,8 @@ func Restart(timeout time.Duration) {
 // Shutdown closes all ListenFlags and waits for their connections to
 // finish.  Shutdown does not return.
 func Shutdown(timeout time.Duration) {
+	<-stopOnce
+
 	_, _, ports := copyFlags()
 	for _, w := range ports {
 		w.Close()
@@ -124,6 +135,8 @@ func (f *forkFlag) Set(s string) error {
 
 func (f *forkFlag) Fork() {
 	if f.fork {
+		<-stopOnce
+
 		// Don't fork in the child
 		f.fork = false
 
@@ -171,15 +184,18 @@ func Run() {
 	incoming := make(chan os.Signal, 10)
 	signal.Notify(incoming, signals...)
 	for sig := range incoming {
+		select {
+		case <-stopOnce:
+			stopOnce <- true
+		default:
+			Fatal.Printf("Aborted by signal during shutdown")
+		}
+
 		switch sigAction(sig) {
 		case sigShutdown:
 			go Shutdown(LameDuck)
-			<-incoming
-			Fatal.Printf("Shutdown aborted")
 		case sigRestart:
 			go Restart(LameDuck)
-			<-incoming
-			Fatal.Printf("Restart aborted")
 		case sigStackDump:
 			V(-5).Printf("Stack dump:\n" + stack())
 		default:
