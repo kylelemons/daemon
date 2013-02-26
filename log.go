@@ -19,7 +19,12 @@ var (
 // A Logger is a level-filtered log writer.
 type Logger int
 
-// Default log levels.
+// Default log levels.  Some of these levels have special meanings; see the
+// documentation for Printf.
+//
+// In the documentation for this package, "higher" log levels correspond to
+// lower numeric values in this list; that is, Error is a higher log level
+// than Verbose.
 const (
 	Error Logger = iota
 	Warning
@@ -37,9 +42,8 @@ func V(level int) Logger {
 	return Logger(level)
 }
 
-// LogLevel controls what log messages are written to the log.
-// Only logs destined for a higher (numerically lower) level
-// will be written.
+// LogLevel controls what log messages are written to the log.  Only logs
+// destined for an equal or higher level will be written.
 var LogLevel = Info
 
 func (l Logger) prefix() string {
@@ -71,12 +75,10 @@ func stack() string {
 	return string(stack)
 }
 
-// Printf formats the log message and writes it to the log if
-// the level is sufficient.  If the message is directed to the
-// Fagal logger, a stack trace of all goroutines will also be
-// written to the log before exiting.  If the logger is Warning
-// or higher (numerically lower), the log will be Sync'd after
-// writing.
+// Printf formats the log message and writes it to the log if the level is
+// sufficient.  If the message is directed to the Fagal logger, a stack trace
+// of all goroutines will also be written to the log before exiting.  If the
+// logger is Warning or higher, the log will be Sync'd after writing.
 func (l Logger) Printf(format string, args ...interface{}) {
 	if l > LogLevel {
 		return
@@ -94,9 +96,9 @@ func (l Logger) Printf(format string, args ...interface{}) {
 	}
 }
 
-// LogLevelFlag registers a flag with the given name which, when set,
-// causes only log messages of higher (numerically lower) priority
-// to be logged.  A pointer to the log level chosen is returned.
+// LogLevelFlag registers a flag with the given name which, when set, causes
+// only log messages of equal or higher level to be logged.  A pointer to the
+// log level chosen is returned.
 func LogLevelFlag(name string) *Logger {
 	flag.IntVar((*int)(&LogLevel), name, int(LogLevel), "Log level (0=Error, 1=Warning, 2=Info, 3+Verbose)")
 	return &LogLevel
