@@ -1,3 +1,17 @@
+// Copyright 2013 Google Inc. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package daemon
 
 import (
@@ -17,8 +31,9 @@ func init() {
 	stopOnce <- true
 }
 
-func copyFlags() (arg0 string, flags []string, ports []*WaitListener) {
-	arg0 = os.Args[0]
+func copyFlags() (cmd *exec.Cmd, ports []*WaitListener) {
+	cmd = exec.Command(os.Args[0])
+
 	flag.VisitAll(func(f *flag.Flag) {
 		switch val := f.Value.(type) {
 		case *listenFlag:
@@ -26,22 +41,28 @@ func copyFlags() (arg0 string, flags []string, ports []*WaitListener) {
 				// flag hasn't been listened yet, so just pass through
 				break
 			}
-			fd := val.listener.Dup()
+
+			// The extra files list doesn't include stdin/out/err
+			fd := 3 + len(cmd.ExtraFiles)
+
+			// Add this flag to the cmd
+			cmd.Args = append(cmd.Args, fmt.Sprintf("--%s=&%d", f.Name, fd))
+			cmd.ExtraFiles = append(cmd.ExtraFiles, val.listener.File())
+
+			// return the port so it can be closed
 			ports = append(ports, val.listener)
-			flags = append(flags, fmt.Sprintf("--%s=&%d", f.Name, fd))
 			return
 		case *forkFlag:
 			// Don't pass fork on to subprocesses
 			return
 		}
-		flags = append(flags, fmt.Sprintf("--%s=%s", f.Name, f.Value))
+		cmd.Args = append(cmd.Args, fmt.Sprintf("--%s=%s", f.Name, f.Value))
 	})
 	return
 }
 
-func spawn(arg0 string, flags []string) {
-	Verbose.Printf("Spawning process: %q %q", arg0, flags)
-	cmd := exec.Command(arg0, flags...)
+func spawn(cmd *exec.Cmd) {
+	Verbose.Printf("Spawning process: %q %q", cmd.Args[0], cmd.Args[1:])
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -55,14 +76,13 @@ func spawn(arg0 string, flags []string) {
 func Restart(timeout time.Duration) {
 	<-stopOnce
 
-	arg0, flags, ports := copyFlags()
+	cmd, ports := copyFlags()
 	for _, w := range ports {
 		w.Stop()
 		// Send noop connections to free up the accept loops
 		w.noop()
 	}
-
-	spawn(arg0, flags)
+	spawn(cmd)
 
 	// Wait for all connections to close out
 	done := make(chan bool)
@@ -86,7 +106,7 @@ func Restart(timeout time.Duration) {
 func Shutdown(timeout time.Duration) {
 	<-stopOnce
 
-	_, _, ports := copyFlags()
+	_, ports := copyFlags()
 	for _, w := range ports {
 		w.Close()
 	}
@@ -141,8 +161,8 @@ func (f *forkFlag) Fork() {
 		f.fork = false
 
 		Verbose.Printf("Forking into the background")
-		arg0, flags, _ := copyFlags()
-		spawn(arg0, flags)
+		cmd, _ := copyFlags()
+		spawn(cmd)
 		os.Exit(0)
 	}
 
