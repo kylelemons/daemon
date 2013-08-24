@@ -23,8 +23,8 @@ import (
 
 // RedirectStdout will cause anything written to standard output to be also
 // written to the LogFileFlagged file.  In particular, when this is true, panic
-// traces will find their way into the logfile.  Set this to false during init to
-// suppress this behavior.
+// traces and standard uses of the "log" package will find their way into the
+// logfile.  Set this to false during init to suppress this behavior.
 var RedirectStdout = true
 
 func redirectStdout() {
