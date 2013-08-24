@@ -133,6 +133,7 @@ func (f *logFileFlag) Set(s string) error {
 	}
 	logger = log.New(io.MultiWriter(os.Stderr, file), logPrefix, logFlags)
 	logFile = file
+	redirectStdout() // provided in OS-specific files
 	return nil
 }
 
