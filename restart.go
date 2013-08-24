@@ -75,6 +75,7 @@ func spawn(cmd *exec.Cmd) {
 // descriptor from this process.  Restart does not return.
 func Restart(timeout time.Duration) {
 	<-stopOnce
+	close(Lamed)
 
 	cmd, ports := copyFlags()
 	for _, w := range ports {
@@ -105,6 +106,7 @@ func Restart(timeout time.Duration) {
 // finish.  Shutdown does not return.
 func Shutdown(timeout time.Duration) {
 	<-stopOnce
+	close(Lamed)
 
 	_, ports := copyFlags()
 	for _, w := range ports {
@@ -189,6 +191,10 @@ func ForkPIDFlags(forkFlagName, pidFlagName string, defPIDFile string) Forker {
 // LameDuck specifies the duration of the lame duck mode after the
 // listener is closed before the binary exits.
 var LameDuck = 15 * time.Second
+
+// Lamed is a channel which will be closed when the daemon is instructed
+// to shut down via the Shutdown or Restart method.
+var Lamed = make(chan struct{})
 
 // Run is the last thing to call from main.  It does not return.
 //
