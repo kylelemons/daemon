@@ -45,7 +45,8 @@ const (
 	Info
 	Verbose
 
-	Fatal Logger = -1
+	Exit  Logger = -1
+	Fatal Logger = -2
 )
 
 // V returns a verbose logger at the given level.  This should
@@ -90,9 +91,11 @@ func stack() string {
 }
 
 // Printf formats the log message and writes it to the log if the level is
-// sufficient.  If the message is directed to the Fagal logger, a stack trace
-// of all goroutines will also be written to the log before exiting.  If the
-// logger is Warning or higher, the log will be Sync'd after writing.
+// sufficient.  If the message is directed at Exit or Fatal, the binary will
+// terminate after the log message is written.  If the message is directed to
+// Fatal or lower, a stack trace of all goroutines will also be written to the
+// log before exiting.  If the logger is Warning or higher, the log will be
+// Sync'd after writing.
 func (l Logger) Printf(format string, args ...interface{}) {
 	if l > LogLevel {
 		return
@@ -105,7 +108,7 @@ func (l Logger) Printf(format string, args ...interface{}) {
 	if l < Info {
 		logFile.Sync()
 	}
-	if l == Fatal {
+	if l == Exit || l == Fatal {
 		os.Exit(1)
 	}
 }

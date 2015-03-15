@@ -35,13 +35,18 @@ var ErrTimeout = errors.New("daemon: timeout")
 type waitConn struct {
 	*sync.WaitGroup
 	net.Conn
+	closeOnce sync.Once
 }
 
 func (c *waitConn) Close() error {
-	defer c.Done()
-	Verbose.Printf("Closed connection: (local) %s <- %s (remote)",
-		c.LocalAddr(), c.RemoteAddr())
-	return c.Conn.Close()
+	err := fmt.Errorf("double close")
+	c.closeOnce.Do(func() {
+		defer c.Done()
+		Verbose.Printf("Closed connection: (local) %s <- %s (remote)",
+			c.LocalAddr(), c.RemoteAddr())
+		err = c.Conn.Close()
+	})
+	return err
 }
 
 // A WaitListener is a listener which accepts connections like a normal
