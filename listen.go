@@ -95,10 +95,15 @@ func (w *WaitListener) Accept() (conn net.Conn, err error) {
 
 // Close stops and closes the listener; it is an error to close more than once.
 func (w *WaitListener) Close() error {
-	close(w.stop)
+	select {
+	case <-w.stop:
+		return fmt.Errorf("listener already closed")
+	default:
+		close(w.stop)
 
-	Verbose.Printf("Closing listener: %s", w.Addr())
-	return w.Listener.Close()
+		Verbose.Printf("Closing listener: %s", w.Addr())
+		return w.Listener.Close()
+	}
 }
 
 // Stop stops the listener so that it can be used in another process.  After
